@@ -1,0 +1,56 @@
+﻿#pragma kernel Init
+#pragma kernel Update
+
+#define THREAD_NUM 32
+#include "CommonData.cginc"
+
+RWStructuredBuffer<Cube> _CubeBuffer;
+
+float _TimeSpeed;
+float _DeltaTime;
+float _ElapsedTime;
+float _WaveHeight;
+float2 _CubeNumXY;
+float2 _PosStepXY;
+float2 _ArangeCenterXY;
+float3 _CubeSizeXY;
+
+[numthreads(THREAD_NUM, THREAD_NUM, 1)]
+void Init(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	uint yid = id.y;
+	// 2次元全スレッドでの唯一のID
+	// _CubeNumX = numthreads.x * threadGroupsXで2次元の横幅を取得
+	uint uniqueID = xid + yid * _CubeNumXY.x;
+	Cube cube = _CubeBuffer[uniqueID];
+
+	float2 offset = _PosStepXY * _ArangeCenterXY;
+	cube.position = float3(xid * _PosStepXY.x - offset.x, yid * _PosStepXY.y - offset.y, 0.0);
+	cube.size = cube.size;
+	cube.color = float4(float(xid) / _CubeNumXY.x, float(yid) /_CubeNumXY.y, 0.0, 1.0);
+
+	_CubeBuffer[uniqueID] = cube;
+}
+
+[numthreads(THREAD_NUM, THREAD_NUM, 1)]
+void Update(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	uint yid = id.y;
+	uint uniqueID = xid + yid * _CubeNumXY.x;
+	Cube cube = _CubeBuffer[uniqueID];
+
+	float angle = (float)uniqueID / (_CubeNumXY.x * _CubeNumXY.y) * (2 * PI);
+	//float angle = (float)yid / _CubeNumXY.y * (2 * PI);
+	//float angle = (float)xid / _CubeNumXY.x * (2 * PI);
+
+	//float sinVal = sin(angle + _ElapsedTime);
+	float cosVal = cos(angle + _ElapsedTime);
+
+	//cube.position.z = cosVal * _WaveHeight;
+	//cube.size = _CubeSizeXY + _CubeSizeXY * abs(cosVal);
+	//cube.color = float4(float(xid) / _CubeNumXY.x, float(yid) / _CubeNumXY.y, abs(cosVal), 1.0);
+
+	_CubeBuffer[uniqueID] = cube;
+}

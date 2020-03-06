@@ -1,0 +1,99 @@
+﻿#pragma kernel Init
+#pragma kernel Update
+
+#define THREAD_NUM 8
+#include "CommonData.cginc"
+#include "SimplexNoise3D.cginc"
+
+RWStructuredBuffer<Cube> _CubeBuffer;
+
+float _TimeSpeed;
+float _DeltaTime;
+float _ElapsedTime;
+float3 _CubeNumXYZ;
+float3 _PosStepXYZ;
+float3 _ArangeCenterXYZ;
+float3 _CubeSizeXYZ;
+
+// numthreads(x,y,z)におけるx * y * zには制限がある
+// なので適宜THREAD_NUMの値を調節する。
+[numthreads(THREAD_NUM, THREAD_NUM, THREAD_NUM)]
+void Init(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	uint yid = id.y;
+	uint zid = id.z;
+	// 全スレッドでの唯一のID
+	uint uniqueID = _CubeNumXYZ.x * _CubeNumXYZ.y * zid + _CubeNumXYZ.x * yid + xid;
+	Cube cube = _CubeBuffer[uniqueID];
+
+	float3 offset = float3(_PosStepXYZ.x * _ArangeCenterXYZ.x, _PosStepXYZ.y * _ArangeCenterXYZ.y, _PosStepXYZ.z * _ArangeCenterXYZ.z);
+	cube.position = float3 
+	(
+		xid * _PosStepXYZ.x - offset.x,
+		yid * _PosStepXYZ.y - offset.y,
+		zid * _PosStepXYZ.z - offset.z
+	);
+	cube.size = cube.size;
+	cube.color = float4
+	(
+		float(xid) / _CubeNumXYZ.x,
+		float(yid) / _CubeNumXYZ.y,
+		float(zid) / _CubeNumXYZ.z,
+		1.0
+	);
+
+	_CubeBuffer[uniqueID] = cube;
+}
+
+[numthreads(THREAD_NUM, THREAD_NUM, THREAD_NUM)]
+void Update(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	uint yid = id.y;
+	uint zid = id.z;
+	uint uniqueID = _CubeNumXYZ.x * _CubeNumXYZ.y * zid + _CubeNumXYZ.x * yid + xid;
+	Cube cube = _CubeBuffer[uniqueID];
+
+	float angleX = float(xid) / _CubeNumXYZ.x;
+	float angleY = float(yid) / _CubeNumXYZ.y;
+	float angleZ = float(zid) / _CubeNumXYZ.z;
+
+	float4 noiseColor;
+
+	// ----- pattern 1 ----- //
+	/*float noise = snoise( float3
+	(
+		cos(angleX + _ElapsedTime) * 0.75,
+		sin(angleY + _ElapsedTime) * 0.8,
+		sin(angleZ) + cos(angleZ)
+	));
+	noise = abs(noise);
+	noiseColor = float4(noise, noise, noise, 1.0);*/
+	// --------------------- //
+
+	// ----- pattern 2 ----- //
+	float3 noise = snoise_grad( float3
+	(
+		cos(angleX + _ElapsedTime * 0.60) * 0.25,
+		sin(angleY + _ElapsedTime * 0.45) * 0.35,
+		sin(angleZ + _ElapsedTime * 0.23) * 0.15 + cos(angleZ + _ElapsedTime * 0.15) * 0.35
+	));
+	noiseColor = float4(noise, 1.0);
+	// --------------------- //
+
+	// ----- pattern 3 ----- //
+	/*float3 noise = snoise_grad( float3
+	(
+		snoise(float3(angleX, angleY, 0) + _ElapsedTime * 0.2) * 0.3,
+		snoise(float3(0, angleY, angleZ) + _ElapsedTime * 0.4) * 0.15,
+		snoise(float3(angleX, 0, angleZ) + _ElapsedTime * 0.1) * 0.5
+	));
+	noiseColor = float4(noise, 1.0);*/
+	// --------------------- //
+
+	cube.color = noiseColor;
+	cube.size  = cube.color.xyz;
+
+	_CubeBuffer[uniqueID] = cube;
+}

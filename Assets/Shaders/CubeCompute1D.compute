@@ -1,0 +1,45 @@
+﻿#pragma kernel Init
+#pragma kernel Update
+
+#define THREAD_NUM 32
+#include "CommonData.cginc"
+
+RWStructuredBuffer<Cube> _CubeBuffer;
+
+int _CubeNumX;
+float _TimeSpeed;
+float _DeltaTime;
+float _ElapsedTime;
+float _PosStep;
+float _ArangeCenter;
+float _WaveHeight;
+float3 _CubeSize;
+
+[numthreads(THREAD_NUM, 1, 1)]
+void Init(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	Cube cube = _CubeBuffer[xid];
+
+	float offset = _PosStep * _ArangeCenter;
+	cube.position = float3(xid * _PosStep - offset, 0.0, 0.0);
+	cube.size = cube.size;
+	cube.color = float4(float(xid) / _CubeNumX, 0.0, 0.0, 1.0);
+
+	_CubeBuffer[xid] = cube;
+}
+
+[numthreads(THREAD_NUM, 1, 1)]
+void Update(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	Cube cube = _CubeBuffer[xid];
+
+	//float angle = (float)(xid+1) / (float)_CubeNumX * (2 * PI);
+	//float sinVal = sin(angle + _ElapsedTime);
+	//cube.position.y = sinVal * _WaveHeight;
+	//cube.size = _CubeSize - _CubeSize * abs(sinVal);
+	//cube.color = float4(float(xid) / _CubeNumX, abs(sinVal), 0.0, 1.0);
+
+	_CubeBuffer[xid] = cube;
+}

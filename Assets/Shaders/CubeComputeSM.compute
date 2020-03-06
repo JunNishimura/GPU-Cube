@@ -1,0 +1,146 @@
+﻿#pragma kernel Init
+#pragma kernel Update
+
+#define THREAD_NUM 8
+#include "CommonData.cginc"
+#include "SimplexNoise3D.cginc"
+
+RWStructuredBuffer<Cube> _CubeBuffer;
+
+int _BlockCenterID;     // 各スレッドブロックで中心に位置するCubeのID
+int _CenterID;          // 全体で中心に位置するCubeのID
+float _DistWeight;   // Cube全体処理でdist変数に掛ける重み
+float _DistWeight2;  // 各スレッドブロック処理でdist変数に掛ける重み
+float _ColorIntensity;  // Cube全体処理での出力色の強さ
+float _ColorIntensity2; // 各スレッドブロック処理での出力色の強さ
+float _TimeSpeed;       
+float _DeltaTime;
+float _ElapsedTime;
+float _NoiseWeight;     // Noiseの強さ
+float3 _CubeNumXYZ;
+float3 _PosStepXYZ;
+float3 _ArangeCenterXYZ;
+float3 _CubeSizeXYZ;
+
+[numthreads(THREAD_NUM, THREAD_NUM, THREAD_NUM)]
+void Init(uint3 id : SV_DispatchThreadID)
+{
+	uint xid = id.x;
+	uint yid = id.y;
+	uint zid = id.z;
+	// 全スレッドでの唯一のID
+	uint uniqueID = _CubeNumXYZ.x * _CubeNumXYZ.y * zid + _CubeNumXYZ.x * yid + xid;
+	Cube cube = _CubeBuffer[uniqueID];
+
+	float3 offset = float3(_PosStepXYZ.x * _ArangeCenterXYZ.x, _PosStepXYZ.y * _ArangeCenterXYZ.y, _PosStepXYZ.z * _ArangeCenterXYZ.z);
+	cube.position = float3 
+	(
+		xid * _PosStepXYZ.x - offset.x,
+		yid * _PosStepXYZ.y - offset.y,
+		zid * _PosStepXYZ.z - offset.z
+	);
+	cube.size = cube.size;
+	cube.color = float4
+	(
+		float(xid) / _CubeNumXYZ.x,
+		float(yid) / _CubeNumXYZ.y,
+		float(zid) / _CubeNumXYZ.z,
+		1.0
+	);
+
+	_CubeBuffer[uniqueID] = cube;
+}
+
+groupshared Cube sharedCubes[THREAD_NUM * THREAD_NUM * THREAD_NUM];
+
+[numthreads(THREAD_NUM, THREAD_NUM, THREAD_NUM)]
+void Update
+(
+	uint3 DTID : SV_DispatchThreadID,
+	uint3 GID  : SV_GroupID,
+	uint3 GTID : SV_GroupThreadID,
+	uint  GI   : SV_GroupIndex
+)
+{
+	uint xid = DTID.x;
+	uint yid = DTID.y;
+	uint zid = DTID.z;
+	uint uniqueID = _CubeNumXYZ.x * _CubeNumXYZ.y * zid + _CubeNumXYZ.x * yid + xid;
+	Cube cube = _CubeBuffer[uniqueID];
+	float xid01 = float(xid) / _CubeNumXYZ.x;
+	float yid01 = float(yid) / _CubeNumXYZ.y;
+	float zid01 = float(zid) / _CubeNumXYZ.z;
+
+	// 全スレッド共通の処理 //
+	// --------------------------------------------------------------//
+	Cube centerCube = _CubeBuffer[(uint)_CenterID];
+	// _CubeBuffer[0] is furthest from the center since it is at the corner.
+	float longestDist = length(_CubeBuffer[0].position - centerCube.position);
+	float3 distVec = cube.position - centerCube.position;
+	float dist = length(distVec);
+	// limit the distance from 0.0 to 1.0
+	dist /= longestDist;
+
+	float cosWave1 = cos(dist * _DistWeight + _ElapsedTime * _TimeSpeed);
+	cosWave1 += _NoiseWeight * snoise(float3(xid01, yid01, zid01) + _ElapsedTime * 0.2);
+	float colVal = 0.5 + 0.5 * cosWave1;
+	// --------------------------------------------------------------//
+
+	// sharedMemoryを用いた各スレッドブロック毎の処理 //
+	// --------------------------------------------------------------//
+	sharedCubes[GI] = cube;
+	GroupMemoryBarrierWithGroupSync();
+
+	// sharedCubes[0] is furthest from the center since it is at the corner.
+	Cube blockCenterCube = sharedCubes[(uint)_BlockCenterID];
+	float3 sh_distVec = cube.position - blockCenterCube.position;
+	float sh_dist = length(sh_distVec);
+	// sharedCubes[0] is furthest from the center since it is at the corner.
+	float sh_longestDist = length(sharedCubes[0].position - blockCenterCube.position);
+	// limit the distance from 0.0 to 1.0
+	sh_dist /= sh_longestDist;
+
+	float cosWave2 =  cos(sh_dist * _DistWeight2 - _ElapsedTime + PI*((GID.x + GID.y + GID.z) % 2));
+	xid01 = float(GTID.x) / THREAD_NUM;
+	yid01 = float(GTID.y) / THREAD_NUM;
+	zid01 = float(GTID.z) / THREAD_NUM;
+	cosWave2 -= _NoiseWeight * snoise(float3(xid01, yid01, zid01) + _ElapsedTime * 0.2);
+	float sh_colVal = 0.5 + 0.5 * cosWave2;
+	// --------------------------------------------------------------//
+	
+
+	// 外枠フレームに該当するスレッドブロックの処理
+	// --------------------------------------------------------------//
+	//float4 frameColor = float4(0.0, 0.0, 0.0, 0.0);
+	//float frameVal = 0.50 + 0.5 * sin(sh_dist * 8.0 + _ElapsedTime * 0.85);
+	//if (GID.z == 0 || GID.z == THREAD_NUM - 1)
+	//{
+	//	if (GID.x == 0 || GID.x == THREAD_NUM - 1 || 
+	//		GID.y == 0 || GID.y == THREAD_NUM - 1)
+	//	{
+	//		frameColor = float4(frameVal, frameVal, frameVal, 0.4); // white
+	//	}
+	//}
+	//else
+	//{
+	//	if ((GID.x == 0 && GID.y == 0) ||
+	//		(GID.x == 0 && GID.y == THREAD_NUM - 1) ||
+	//		(GID.x == THREAD_NUM - 1 && GID.y == 0) ||
+	//		(GID.x == THREAD_NUM - 1 && GID.y == THREAD_NUM - 1))
+	//	{
+	//		frameColor = float4(frameVal, frameVal, frameVal, 0.4); // white
+	//	}
+	//}
+	// --------------------------------------------------------------//
+
+	// 合成
+	// --------------------------------------------------------------//
+	colVal    *= _ColorIntensity;
+	sh_colVal *= _ColorIntensity2;
+	cube.color = float4(sh_colVal+ colVal, sh_colVal+ colVal, sh_colVal+ colVal, 1.0);
+	cube.size  = float3(sh_colVal+ colVal, sh_colVal + colVal, sh_colVal+ colVal);
+	// --------------------------------------------------------------//
+
+	// 出力
+	_CubeBuffer[uniqueID] = cube;
+}
